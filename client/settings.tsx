@@ -127,6 +127,8 @@ function settingsNotice(settings: RouterSettingsState): string {
 }
 
 const reserveChoices = [0.03, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5];
+const unusedTier = "__unused_tier__";
+const providerDefaultThinking = "__provider_default__";
 
 /** Routing controls for provider pools and model routes. Each change saves at once. */
 function ModelsSection({
@@ -139,6 +141,9 @@ function ModelsSection({
   const [selectedModels, setSelectedModels] = useState<Record<string, string>>({});
   const [selectedPools, setSelectedPools] = useState<Record<string, string>>({});
   const [selectedTiers, setSelectedTiers] = useState<Record<string, Route["tiers"]>>({});
+  const [selectedThinking, setSelectedThinking] = useState<
+    Record<string, Partial<Record<Route["tiers"][number], string>>>
+  >({});
   const [openCategories, setOpenCategories] = useState<string | null>(null);
   if (settings.status !== "ready") {
     return (
@@ -231,6 +236,10 @@ function ModelsSection({
               {routes.map((route) => {
                 const categoryKey = `route:${route.provider}/${route.model}`;
                 const categoriesOpen = openCategories === categoryKey;
+                const modelOptions =
+                  models.find(
+                    (entry) => entry.provider === route.provider && entry.model === route.model,
+                  )?.thinkingOptions ?? [];
                 return (
                   <View
                     key={`${route.provider}/${route.model}`}
@@ -238,7 +247,7 @@ function ModelsSection({
                   >
                     <SettingsSwitch
                       label={`${route.provider}/${route.model}`}
-                      hint={`${route.tiers.join(", ")} tasks · quality ${route.quality}`}
+                      hint={`${route.tiers.map((tier) => `${tier}: ${route.thinking[tier] ?? "default"}`).join(", ")} · quality ${route.quality}`}
                       value={route.enabled}
                       disabled={saving}
                       onValueChange={(enabled) =>
@@ -246,38 +255,68 @@ function ModelsSection({
                       }
                     />
                     <SettingsAction
-                      label={`Task categories: ${route.tiers.join(", ")}`}
+                      label="Task categories and thinking modes"
                       actionLabel={categoriesOpen ? "Done" : "Edit"}
                       disabled={saving}
                       onPress={() => setOpenCategories(categoriesOpen ? null : categoryKey)}
                     />
                     {categoriesOpen &&
-                      tiers.map((tier) => (
-                        <SettingsSwitch
-                          key={tier}
-                          label={tier}
-                          value={route.tiers.includes(tier)}
-                          disabled={saving || (route.tiers.length === 1 && route.tiers[0] === tier)}
-                          onValueChange={(included) =>
-                            void settings.save(
-                              {
-                                ...values,
-                                routes: values.routes.map((candidate) =>
-                                  candidate === route
-                                    ? {
+                      tiers.map((tier) => {
+                        const isUsed = route.tiers.includes(tier);
+                        const currentThinking = route.thinking[tier];
+                        const value = isUsed
+                          ? (currentThinking ?? providerDefaultThinking)
+                          : unusedTier;
+                        const options = [
+                          ...(isUsed && route.tiers.length === 1
+                            ? []
+                            : [{ label: "Not used", value: unusedTier }]),
+                          { label: "Provider default", value: providerDefaultThinking },
+                          ...modelOptions.map((option) => ({ label: option, value: option })),
+                          ...(currentThinking && !modelOptions.includes(currentThinking)
+                            ? [{ label: currentThinking, value: currentThinking }]
+                            : []),
+                        ];
+                        return (
+                          <SettingsSelect
+                            key={tier}
+                            label={`${tier} thinking mode`}
+                            value={value}
+                            options={options}
+                            disabled={saving}
+                            onValueChange={(thinking) =>
+                              void settings.save(
+                                {
+                                  ...values,
+                                  routes: values.routes.map((candidate) => {
+                                    if (candidate !== route) return candidate;
+                                    const { [tier]: _previous, ...thinkingByTier } =
+                                      candidate.thinking;
+                                    if (thinking === unusedTier) {
+                                      return {
                                         ...candidate,
-                                        tiers: included
-                                          ? [...new Set([...candidate.tiers, tier])]
-                                          : candidate.tiers.filter((value) => value !== tier),
-                                      }
-                                    : candidate,
-                                ),
-                              },
-                              revision,
-                            )
-                          }
-                        />
-                      ))}
+                                        tiers: candidate.tiers.filter((value) => value !== tier),
+                                        thinking: thinkingByTier,
+                                      };
+                                    }
+                                    return {
+                                      ...candidate,
+                                      tiers: candidate.tiers.includes(tier)
+                                        ? candidate.tiers
+                                        : [...candidate.tiers, tier],
+                                      thinking:
+                                        thinking === providerDefaultThinking
+                                          ? thinkingByTier
+                                          : { ...thinkingByTier, [tier]: thinking },
+                                    };
+                                  }),
+                                },
+                                revision,
+                              )
+                            }
+                          />
+                        );
+                      })}
                   </View>
                 );
               })}
@@ -303,6 +342,10 @@ function ModelsSection({
             providerModels[0];
           const pool = selectedPools[provider] ?? defaultPool;
           const categories: Route["tiers"] = selectedTiers[provider] ?? ["quick"];
+          const thinkingByTier = selectedThinking[provider] ?? {};
+          const categorySummary = categories
+            .map((tier) => `${tier}: ${thinkingByTier[tier] ?? "default"}`)
+            .join(", ");
           const categoryKey = `provider:${provider}`;
           const categoriesOpen = openCategories === categoryKey;
           return (
@@ -325,28 +368,50 @@ function ModelsSection({
                 onValueChange={(value) => setSelectedPools({ ...selectedPools, [provider]: value })}
               />
               <SettingsAction
-                label={`Task categories: ${categories.join(", ") || "none selected"}`}
+                label={`Task categories and thinking modes: ${categorySummary || "none selected"}`}
                 actionLabel={categoriesOpen ? "Done" : "Edit"}
                 disabled={saving}
                 onPress={() => setOpenCategories(categoriesOpen ? null : categoryKey)}
               />
               {categoriesOpen &&
-                tiers.map((tier) => (
-                  <SettingsSwitch
-                    key={tier}
-                    label={tier}
-                    value={categories.includes(tier)}
-                    disabled={saving}
-                    onValueChange={(included) =>
-                      setSelectedTiers({
-                        ...selectedTiers,
-                        [provider]: included
-                          ? [...new Set([...categories, tier])]
-                          : categories.filter((value) => value !== tier),
-                      })
-                    }
-                  />
-                ))}
+                tiers.map((tier) => {
+                  const isUsed = categories.includes(tier);
+                  const value = isUsed
+                    ? (thinkingByTier[tier] ?? providerDefaultThinking)
+                    : unusedTier;
+                  return (
+                    <SettingsSelect
+                      key={tier}
+                      label={`${tier} thinking mode`}
+                      value={value}
+                      options={[
+                        { label: "Not used", value: unusedTier },
+                        { label: "Provider default", value: providerDefaultThinking },
+                        ...model.thinkingOptions.map((option) => ({
+                          label: option,
+                          value: option,
+                        })),
+                      ]}
+                      disabled={saving}
+                      onValueChange={(thinking) => {
+                        setSelectedTiers({
+                          ...selectedTiers,
+                          [provider]:
+                            thinking === unusedTier
+                              ? categories.filter((value) => value !== tier)
+                              : [...new Set([...categories, tier])],
+                        });
+                        setSelectedThinking({
+                          ...selectedThinking,
+                          [provider]: {
+                            ...thinkingByTier,
+                            [tier]: thinking,
+                          },
+                        });
+                      }}
+                    />
+                  );
+                })}
               <SettingsAction
                 label={`Add ${model.model} to routing`}
                 actionLabel="Add model"
@@ -364,7 +429,14 @@ function ModelsSection({
                           tiers: categories,
                           quality: 50,
                           capabilities: [],
-                          thinking: {},
+                          thinking: Object.fromEntries(
+                            Object.entries(thinkingByTier).filter(
+                              ([tier, value]) =>
+                                categories.includes(tier as Route["tiers"][number]) &&
+                                value !== providerDefaultThinking &&
+                                value !== unusedTier,
+                            ),
+                          ),
                           enabled: true,
                         },
                       ],

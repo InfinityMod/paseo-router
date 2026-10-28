@@ -347,11 +347,13 @@ test("router status exposes available provider models", () => {
   const status = routerStatus.output.parse({
     pools: [],
     paused: [],
-    providerModels: [{ provider: "claude", model: "big" }],
+    providerModels: [{ provider: "claude", model: "big", thinkingOptions: ["low", "high"] }],
     decisionModels: [],
     decisions: [],
   });
-  assert.deepEqual(status.providerModels, [{ provider: "claude", model: "big" }]);
+  assert.deepEqual(status.providerModels, [
+    { provider: "claude", model: "big", thinkingOptions: ["low", "high"] },
+  ]);
 });
 
 test("the spawn prompt comes from the running create_agent call with the same title", async () => {

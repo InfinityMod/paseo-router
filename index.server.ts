@@ -109,11 +109,15 @@ export default function contribute(server: PluginServerContext): PluginCleanup {
       quota.read(await readSettings()),
       readDecisionModels(),
     ]);
-    let providerModels: { provider: string; model: string }[] = [];
+    let providerModels: { provider: string; model: string; thinkingOptions: string[] }[] = [];
     try {
       const catalog = await new PaseoRouterGateway(context.paseo).readCatalog(process.cwd());
       providerModels = Object.entries(catalog).flatMap(([provider, entry]) =>
-        Object.keys(entry.models).map((model) => ({ provider, model })),
+        Object.entries(entry.models).map(([model, thinkingOptions]) => ({
+          provider,
+          model,
+          thinkingOptions: [...thinkingOptions],
+        })),
       );
     } catch (error) {
       console.error("Provider model list unavailable", error);
