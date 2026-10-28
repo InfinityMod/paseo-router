@@ -22,6 +22,7 @@ import {
   routerStatus,
   routingModes,
   settingsSchema,
+  tiers,
   type Route,
   type RouterSettings,
 } from "../shared/router.ts";
@@ -86,7 +87,7 @@ export function RouterSettingsScreen({ theme, layout }: PluginSurfaceProps): Rea
           ))}
         </SettingsCard>
       </SettingsSection>
-      <ModelsSection settings={settings} />
+      <ModelsSection settings={settings} models={status.data?.providerModels ?? []} />
       <ClassifierSection
         settings={settings}
         models={status.data?.decisionModels ?? []}
@@ -127,8 +128,18 @@ function settingsNotice(settings: RouterSettingsState): string {
 
 const reserveChoices = [0.03, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5];
 
-/** Reserve share plus one switch per provider and per model. Each change saves at once. */
-function ModelsSection({ settings }: { settings: RouterSettingsState }): ReactElement {
+/** Routing controls for provider pools and model routes. Each change saves at once. */
+function ModelsSection({
+  settings,
+  models,
+}: {
+  settings: RouterSettingsState;
+  models: RouterStatus["providerModels"];
+}): ReactElement {
+  const [selectedModels, setSelectedModels] = useState<Record<string, string>>({});
+  const [selectedPools, setSelectedPools] = useState<Record<string, string>>({});
+  const [selectedTiers, setSelectedTiers] = useState<Record<string, Route["tiers"]>>({});
+  const [openCategories, setOpenCategories] = useState<string | null>(null);
   if (settings.status !== "ready") {
     return (
       <SettingsSection title="Models and providers">
@@ -150,6 +161,10 @@ function ModelsSection({ settings }: { settings: RouterSettingsState }): ReactEl
   // A reserve typed into the catalog stays selectable next to the presets.
   const reserves = [...new Set([...reserveChoices, values.minFraction])].sort((a, b) => a - b);
   const poolIds = [...new Set(values.routes.map((route) => route.pool))];
+  const availableModels = models.filter(
+    ({ provider, model }) =>
+      !values.routes.some((route) => route.provider === provider && route.model === model),
+  );
   return (
     <>
       <SettingsSection title="Routing">
@@ -213,18 +228,151 @@ function ModelsSection({ settings }: { settings: RouterSettingsState }): ReactEl
                 disabled={saving}
                 onValueChange={(enabled) => setEnabled((route) => route.pool === poolId, enabled)}
               />
-              {routes.map((route) => (
-                <SettingsSwitch
-                  key={`${route.provider}/${route.model}`}
-                  label={`${route.provider}/${route.model}`}
-                  hint={`${route.tiers.join(", ")} tasks · quality ${route.quality}`}
-                  value={route.enabled}
-                  disabled={saving}
-                  onValueChange={(enabled) =>
-                    setEnabled((candidate) => candidate === route, enabled)
-                  }
-                />
-              ))}
+              {routes.map((route) => {
+                const categoryKey = `route:${route.provider}/${route.model}`;
+                const categoriesOpen = openCategories === categoryKey;
+                return (
+                  <View
+                    key={`${route.provider}/${route.model}`}
+                    style={{ gap: 4, paddingVertical: 8 }}
+                  >
+                    <SettingsSwitch
+                      label={`${route.provider}/${route.model}`}
+                      hint={`${route.tiers.join(", ")} tasks · quality ${route.quality}`}
+                      value={route.enabled}
+                      disabled={saving}
+                      onValueChange={(enabled) =>
+                        setEnabled((candidate) => candidate === route, enabled)
+                      }
+                    />
+                    <SettingsAction
+                      label={`Task categories: ${route.tiers.join(", ")}`}
+                      actionLabel={categoriesOpen ? "Done" : "Edit"}
+                      disabled={saving}
+                      onPress={() => setOpenCategories(categoriesOpen ? null : categoryKey)}
+                    />
+                    {categoriesOpen &&
+                      tiers.map((tier) => (
+                        <SettingsSwitch
+                          key={tier}
+                          label={tier}
+                          value={route.tiers.includes(tier)}
+                          disabled={saving || (route.tiers.length === 1 && route.tiers[0] === tier)}
+                          onValueChange={(included) =>
+                            void settings.save(
+                              {
+                                ...values,
+                                routes: values.routes.map((candidate) =>
+                                  candidate === route
+                                    ? {
+                                        ...candidate,
+                                        tiers: included
+                                          ? [...new Set([...candidate.tiers, tier])]
+                                          : candidate.tiers.filter((value) => value !== tier),
+                                      }
+                                    : candidate,
+                                ),
+                              },
+                              revision,
+                            )
+                          }
+                        />
+                      ))}
+                  </View>
+                );
+              })}
+            </SettingsCard>
+          );
+        })}
+      </SettingsSection>
+      <SettingsSection title="Available provider models">
+        {availableModels.length === 0 && (
+          <SettingsCard>
+            <SettingsRow label="No additional provider models available" />
+          </SettingsCard>
+        )}
+        {[...new Set(availableModels.map(({ provider }) => provider))].map((provider) => {
+          const providerModels = availableModels.filter((entry) => entry.provider === provider);
+          const defaultPool =
+            values.routes.find((route) => route.provider === provider)?.pool ??
+            values.pools.find((pool) => pool.id === provider)?.id ??
+            values.pools[0]?.id ??
+            "";
+          const model =
+            providerModels.find((entry) => entry.model === selectedModels[provider]) ??
+            providerModels[0];
+          const pool = selectedPools[provider] ?? defaultPool;
+          const categories: Route["tiers"] = selectedTiers[provider] ?? ["quick"];
+          const categoryKey = `provider:${provider}`;
+          const categoriesOpen = openCategories === categoryKey;
+          return (
+            <SettingsCard key={provider}>
+              <SettingsRow label={`${provider} · ${providerModels.length} additional models`} />
+              <SettingsSelect
+                label="Model"
+                value={model.model}
+                options={providerModels.map(({ model }) => ({ label: model, value: model }))}
+                disabled={saving}
+                onValueChange={(value) =>
+                  setSelectedModels({ ...selectedModels, [provider]: value })
+                }
+              />
+              <SettingsSelect
+                label="Pool"
+                value={pool}
+                options={values.pools.map(({ id }) => ({ label: id, value: id }))}
+                disabled={saving || values.pools.length === 0}
+                onValueChange={(value) => setSelectedPools({ ...selectedPools, [provider]: value })}
+              />
+              <SettingsAction
+                label={`Task categories: ${categories.join(", ") || "none selected"}`}
+                actionLabel={categoriesOpen ? "Done" : "Edit"}
+                disabled={saving}
+                onPress={() => setOpenCategories(categoriesOpen ? null : categoryKey)}
+              />
+              {categoriesOpen &&
+                tiers.map((tier) => (
+                  <SettingsSwitch
+                    key={tier}
+                    label={tier}
+                    value={categories.includes(tier)}
+                    disabled={saving}
+                    onValueChange={(included) =>
+                      setSelectedTiers({
+                        ...selectedTiers,
+                        [provider]: included
+                          ? [...new Set([...categories, tier])]
+                          : categories.filter((value) => value !== tier),
+                      })
+                    }
+                  />
+                ))}
+              <SettingsAction
+                label={`Add ${model.model} to routing`}
+                actionLabel="Add model"
+                disabled={saving || pool === "" || categories.length === 0}
+                onPress={() =>
+                  void settings.save(
+                    {
+                      ...values,
+                      routes: [
+                        ...values.routes,
+                        {
+                          provider,
+                          model: model.model,
+                          pool,
+                          tiers: categories,
+                          quality: 50,
+                          capabilities: [],
+                          thinking: {},
+                          enabled: true,
+                        },
+                      ],
+                    },
+                    revision,
+                  )
+                }
+              />
             </SettingsCard>
           );
         })}

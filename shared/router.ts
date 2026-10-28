@@ -277,6 +277,7 @@ export const routerStatus = defineRpc({
   output: z.object({
     pools: z.array(poolStatusSchema),
     paused: z.array(z.object({ route: z.string(), until: z.string(), why: z.string() })),
+    providerModels: z.array(z.object({ provider: z.string(), model: z.string() })),
     decisionModels: z.array(
       z.object({ id: z.string(), name: z.string(), usdPerMTok: z.number().nullable() }),
     ),

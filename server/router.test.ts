@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AgentSessionConfig } from "@getpaseo/protocol/agent-types";
-import { settingsSchema } from "../shared/router.ts";
+import { routerStatus, settingsSchema } from "../shared/router.ts";
 import type { Classification, PoolState, ProviderCatalog, TaskText } from "./contracts.ts";
 import { PaseoRouterGateway, type RouterSdk } from "./paseo.ts";
 import { AutoRouter, spawnRule, type RouterGateway, type Spawn } from "./router.ts";
@@ -341,6 +341,17 @@ test("the catalog lists ready, enabled providers with their thinking options", a
     claude: { models: { big: ["low", "high"] } },
     omp: { models: {} },
   });
+});
+
+test("router status exposes available provider models", () => {
+  const status = routerStatus.output.parse({
+    pools: [],
+    paused: [],
+    providerModels: [{ provider: "claude", model: "big" }],
+    decisionModels: [],
+    decisions: [],
+  });
+  assert.deepEqual(status.providerModels, [{ provider: "claude", model: "big" }]);
 });
 
 test("the spawn prompt comes from the running create_agent call with the same title", async () => {

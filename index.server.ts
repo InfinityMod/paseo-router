@@ -109,9 +109,19 @@ export default function contribute(server: PluginServerContext): PluginCleanup {
       quota.read(await readSettings()),
       readDecisionModels(),
     ]);
+    let providerModels: { provider: string; model: string }[] = [];
+    try {
+      const catalog = await new PaseoRouterGateway(context.paseo).readCatalog(process.cwd());
+      providerModels = Object.entries(catalog).flatMap(([provider, entry]) =>
+        Object.keys(entry.models).map((model) => ({ provider, model })),
+      );
+    } catch (error) {
+      console.error("Provider model list unavailable", error);
+    }
     return {
       pools: Object.values(snapshot.pools).map(({ modelFractions: _models, ...pool }) => pool),
       paused: router.paused(),
+      providerModels,
       decisionModels: models,
       decisions: [...router.recent()],
     };
